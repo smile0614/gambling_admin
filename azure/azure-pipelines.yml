@@ -1,0 +1,36 @@
+trigger:
+  branches:
+    include:
+    - main
+    - dev
+
+resources:
+  repositories:
+  - repository: bonenza-admin-new-main
+    name: sparck-lucky/bonenza-admin-new
+    type: github
+    endpoint: sparck-lucky
+    ref: main
+  - repository: bonenza-admin-new-dev
+    name: sparck-lucky/bonenza-admin-new
+    type: github
+    endpoint: sparck-lucky
+    ref: dev
+  - repository: argocd-bonenza-admin-new
+    name: bonenza/argocd-bonenza-admin-new
+    type: git
+
+pool:
+  name: nodepool1
+
+stages:
+- stage: buildandeploy
+  jobs:
+  - ${{ if eq(variables['Build.SourceBranchName'], 'main') }}: 
+    - template: template.yml
+      parameters:
+        GroupVariablesName: BONENZA-ADMIN-NEW-PRD
+  - ${{ if eq(variables['Build.SourceBranchName'], 'dev') }}: 
+    - template: template.yml
+      parameters:
+        GroupVariablesName: BONENZA-ADMIN-NEW-STG

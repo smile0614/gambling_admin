@@ -1,0 +1,69 @@
+parameters:
+  GroupVariablesName: ''
+
+jobs:
+- job: build_and_deploy_app
+  displayName: 'Build and Deploy application'
+  variables:
+  - group: ${{ parameters.GroupVariablesName }}
+
+  steps:
+  - checkout: bonenza-admin-new-main
+    condition: eq(variables['Build.SourceBranchName'], 'main')
+  - checkout: bonenza-admin-new-dev
+    condition: eq(variables['Build.SourceBranchName'], 'dev')
+  - script: |
+      echo "Current Branch: $(Build.SourceBranchName)"
+      # Add any branch-specific commands or scripts here
+    displayName: 'Branch Info'
+  
+  - task: CmdLine@2
+    displayName: 'Setup Docker'
+    inputs:
+      script: |
+        sudo apt install docker.io -y
+        sudo usermod -aG docker $USER
+        sudo chmod 777 /var/run/docker.sock
+        docker images
+        docker --version
+        docker system prune -af
+        docker image prune -af
+        echo "Pipeline diagnostics"
+        echo "$(ls -al)"
+        echo "$(pwd)"
+
+  - task: Docker@2
+    displayName: Build Admin Backend image
+    inputs:
+      command: build
+      repository: $(imageRepository)
+      containerRegistry: ACRDDServiceConnection
+      dockerfile: ./$(imagerepository)/docker/Dockerfile
+      buildContext: ./$(imagerepository)
+      tags: '$(Build.SourceBranchName)-$(Build.BuildId)'
+      arguments: '--build-arg AZURE_CLIENT_ID="$(AZURE_CLIENT_ID)" --build-arg AZURE_CLIENT_SECRET="$(AZURE_CLIENT_SECRET)" --build-arg AZURE_TENANT_ID="$(AZURE_TENANT_ID)" --build-arg AZURE_KEYVAULT="$(AZURE_KEYVAULT)"'
+
+  - task: Docker@2
+    displayName: Push Admin Backend image
+    inputs:
+      command: push
+      repository: $(imageRepository)
+      containerRegistry: ACRDDServiceConnection
+      tags: '$(Build.SourceBranchName)-$(Build.BuildId)'
+
+  - checkout: argocd-bonenza-admin-new
+    clean: true
+    persistCredentials: true
+
+  - script: |
+      branch=$(Build.SourceBranchName)
+      cd argocd-bonenza-admin-new
+      git config --global user.email "azure-pipeline@bonenza.com"
+      git config --global user.name "Bonenza Devops"
+      # No need for git checkout if always working on main
+      cat ./${branch}/$(imagerepository)/deployments.yaml
+      sed -i "s|:${branch}-.*|:${branch}-$(Build.BuildId)|g" ./${branch}/$(imagerepository)/deployments.yaml
+      git add ./${branch}/$(imagerepository)/deployments.yaml
+      git commit -m "Update image tag ${branch}-$(Build.BuildId)"
+      git push origin HEAD:main
+    displayName: 'Update image tag and push it to repo'
